@@ -1,0 +1,42 @@
+services:
+  api:
+    build: .
+    container_name: zenafide-api
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/zenafide
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-development-secret}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      OPERATOR_EMAIL: ${OPERATOR_EMAIL:-operator@example.com}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-operator123}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  db:
+    image: postgres:16-alpine
+    container_name: zenafide-db
+    environment:
+      POSTGRES_DB: zenafide
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d zenafide"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

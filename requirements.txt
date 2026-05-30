@@ -4,5 +4,10 @@ pydantic
 pydantic-settings
 python-multipart
 email-validator
+sqlalchemy
+psycopg2-binary
+alembic
+pyjwt
+pwdlib[argon2]
 pytest
 httpx
