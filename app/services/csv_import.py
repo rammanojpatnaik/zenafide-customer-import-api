@@ -1,6 +1,7 @@
 import csv
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
 
@@ -13,6 +14,7 @@ from app.services.metrics import record_import
 
 VALID_STATUSES = {"active", "inactive"}
 VALID_TIERS = {"std", "pro", "ent"}
+EXPECTED_COLUMN_COUNT = 10
 logger = logging.getLogger(__name__)
 
 
@@ -21,6 +23,20 @@ class RowValidationError(Exception):
         self.code = code
         self.message = message
         super().__init__(message)
+
+
+@dataclass
+class MalformedCsvRow:
+    row_number: int
+    raw_row: str
+    message: str
+
+
+@dataclass
+class ReconstructedCsv:
+    text: str
+    row_numbers: list[int]
+    malformed_rows: list[MalformedCsvRow]
 
 
 def import_customers_csv(
@@ -62,7 +78,8 @@ def import_customers_csv(
         finish_import_metrics_and_log(import_job)
         return import_job
 
-    reader = csv.DictReader(StringIO(text))
+    reconstructed_csv = reconstruct_logical_csv_rows(text, import_job.id)
+    reader = csv.DictReader(StringIO(reconstructed_csv.text))
     if not reader.fieldnames:
         import_job.status = "failed"
         import_job.failed_rows = 1
@@ -81,7 +98,25 @@ def import_customers_csv(
         finish_import_metrics_and_log(import_job)
         return import_job
 
-    for line_number, row in enumerate(reader, start=2):
+    for malformed_row in reconstructed_csv.malformed_rows:
+        import_job.total_rows += 1
+        import_job.failed_rows += 1
+        log_row_failure(
+            import_job_id=import_job.id,
+            row_number=malformed_row.row_number,
+            error_code="invalid_column_count",
+        )
+        db.add(
+            ImportError(
+                import_job_id=import_job.id,
+                row_number=malformed_row.row_number,
+                raw_row=malformed_row.raw_row,
+                error_code="invalid_column_count",
+                message=malformed_row.message,
+            )
+        )
+
+    for line_number, row in zip(reconstructed_csv.row_numbers, reader):
         import_job.total_rows += 1
         normalized_row = normalize_row(row)
 
@@ -89,13 +124,10 @@ def import_customers_csv(
             customer_data = validate_customer_row(normalized_row)
         except RowValidationError as exc:
             import_job.failed_rows += 1
-            logger.warning(
-                "customer_import_row_failed",
-                extra={
-                    "import_job_id": import_job.id,
-                    "row_number": line_number,
-                    "error_code": exc.code,
-                },
+            log_row_failure(
+                import_job_id=import_job.id,
+                row_number=line_number,
+                error_code=exc.code,
             )
             db.add(
                 ImportError(
@@ -120,6 +152,96 @@ def import_customers_csv(
     db.refresh(import_job)
     finish_import_metrics_and_log(import_job)
     return import_job
+
+
+def reconstruct_logical_csv_rows(text: str, import_job_id: int) -> ReconstructedCsv:
+    physical_lines = text.splitlines()
+    if not physical_lines:
+        return ReconstructedCsv(text="", row_numbers=[], malformed_rows=[])
+
+    header = physical_lines[0]
+    logical_rows = []
+    row_numbers = []
+    malformed_rows = []
+    index = 1
+
+    while index < len(physical_lines):
+        if not physical_lines[index].strip():
+            index += 1
+            continue
+
+        start_line_number = index + 1
+        buffered_line = physical_lines[index].strip()
+        recovered_multiline = False
+
+        while True:
+            column_count = count_csv_columns(buffered_line)
+            if column_count < EXPECTED_COLUMN_COUNT:
+                index += 1
+                if index >= len(physical_lines):
+                    malformed_rows.append(
+                        MalformedCsvRow(
+                            row_number=start_line_number,
+                            raw_row=buffered_line,
+                            message=(
+                                "CSV row ended before all 10 expected columns "
+                                "could be reconstructed."
+                            ),
+                        )
+                    )
+                    break
+                buffered_line = f"{buffered_line} {physical_lines[index].strip()}"
+                recovered_multiline = True
+                continue
+
+            if column_count == EXPECTED_COLUMN_COUNT:
+                logical_rows.append(buffered_line)
+                row_numbers.append(start_line_number)
+                if recovered_multiline:
+                    logger.info(
+                        "customer_import_multiline_recovered",
+                        extra={
+                            "import_job_id": import_job_id,
+                            "row_number": start_line_number,
+                        },
+                    )
+                index += 1
+                break
+
+            malformed_rows.append(
+                MalformedCsvRow(
+                    row_number=start_line_number,
+                    raw_row=buffered_line,
+                    message="CSV row contains more than the 10 expected columns.",
+                )
+            )
+            index += 1
+            break
+
+    reconstructed_text = "\n".join([header, *logical_rows])
+    return ReconstructedCsv(
+        text=reconstructed_text,
+        row_numbers=row_numbers,
+        malformed_rows=malformed_rows,
+    )
+
+
+def count_csv_columns(buffered_line: str) -> int:
+    try:
+        return len(next(csv.reader([buffered_line])))
+    except csv.Error:
+        return EXPECTED_COLUMN_COUNT + 1
+
+
+def log_row_failure(import_job_id: int, row_number: int, error_code: str) -> None:
+    logger.warning(
+        "customer_import_row_failed",
+        extra={
+            "import_job_id": import_job_id,
+            "row_number": row_number,
+            "error_code": error_code,
+        },
+    )
 
 
 def finish_import_metrics_and_log(import_job: ImportJob) -> None:

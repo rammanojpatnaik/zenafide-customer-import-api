@@ -1,3 +1,6 @@
+from pathlib import Path
+
+
 def upload_csv(client, csv_text, filename="customers.csv"):
     return client.post(
         "/imports/customers",
@@ -101,3 +104,83 @@ def test_import_rejects_non_csv_upload(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Only CSV files are supported."
+
+
+def test_import_accepts_normal_row(client):
+    csv_text = """p,row,cid,email,name,status,tier,upd,tags,note
+p1,001,C1001,ada@x.io,Ada Lovelace,active,ent,20260420,vip,email
+"""
+
+    response = upload_csv(client, csv_text)
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "completed"
+
+
+def test_import_recovers_wrapped_multiline_name(client, caplog):
+    csv_text = """p,row,cid,email,name,status,tier,upd,tags,note
+p1,001,C1001,Ada@x.io,Ada
+Lovelace,active,ent,20260420,vip,email
+"""
+
+    response = upload_csv(client, csv_text)
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "completed"
+    customer = client.get("/customers", params={"partner_id": "p1"}).json()["items"][0]
+    assert customer["name"] == "Ada Lovelace"
+    assert "customer_import_multiline_recovered" in caplog.messages
+
+
+def test_import_records_unrecoverable_malformed_row(client):
+    csv_text = """p,row,cid,email,name,status,tier,upd,tags,note
+p1,001,C1001,ada@x.io,Ada Lovelace,active,ent,20260420,vip,email,unexpected
+"""
+
+    response = upload_csv(client, csv_text)
+
+    assert response.status_code == 201
+    summary = response.json()
+    assert summary["status"] == "failed"
+    assert summary["total_rows"] == 1
+    assert summary["successful_rows"] == 0
+    assert summary["failed_rows"] == 1
+    errors = client.get(summary["errors_url"]).json()["items"]
+    assert errors[0]["error_code"] == "invalid_column_count"
+
+
+def test_example_csv_uses_newest_upd_value(client):
+    csv_text = Path("tests/example.csv").read_text()
+
+    response = upload_csv(client, csv_text, filename="example.csv")
+
+    assert response.status_code == 201
+    summary = response.json()
+    assert summary["status"] == "partial_success"
+    assert summary["total_rows"] == 19
+    assert summary["successful_rows"] == 17
+    assert summary["failed_rows"] == 2
+
+    errors = client.get(summary["errors_url"]).json()
+    assert [item["error_code"] for item in errors["items"]] == [
+        "invalid_email",
+        "invalid_tier",
+    ]
+
+    customers = client.get(
+        "/customers",
+        params={"partner_id": "p1", "page_size": 100},
+    ).json()["items"]
+    customers_by_cid = {
+        customer["partner_customer_id"]: customer
+        for customer in customers
+        if customer["partner_customer_id"]
+    }
+
+    assert customers_by_cid["C1001"]["name"] == "Ada Byron"
+    assert customers_by_cid["C1001"]["source_updated_at"].startswith("2026-04-21")
+    assert customers_by_cid["C1002"]["tier"] == "std"
+    assert customers_by_cid["C1002"]["source_updated_at"].startswith("2026-04-22")
+    assert customers_by_cid["C1006"]["email"] == "eve@x.io"
+    assert customers_by_cid["C1006"]["tier"] == "ent"
+    assert customers_by_cid["C1006"]["source_updated_at"].startswith("2026-04-22")
