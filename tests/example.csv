@@ -1,0 +1,35 @@
+p,row,cid,email,name,status,tier,upd,tags,note
+p1,001,C1001,ada@x.io,Ada Lovelace,active,ent,20260420,vip,email
+p1,002,C1002,grace@x.io,Grace
+Hopper,active,pro,20260420,compiler,billing
+p1,003,,kat@x.io,Katherine Johnson,active,std,20260420,space,legacy
+p2,004,C1001,ada@x.io,Ada
+Lovelace,active,std,20260420,vip,partner-b
+p1,005,C1003,annie@x.io,Annie
+Easley,active,std,20260420,math,onboard
+p1,006,C1003,annie@x.io,Annie
+Easley,active,std,20260420,math,duplicate
+p1,007,C1004,bad-email,Hedy
+Lamarr,active,pro,20260420,wireless,bad-email
+p1,008,C1005,radia@x.io,Radia
+Perlman,active,ent,20260420,network,review
+p1,009,C1006,evelyn@x.io,Evelyn
+Granville,active,pro,20260420,math,imported
+p1,010,C1007,mag@x.io,M
+Hamilton,active,ent,20260420,apollo,bad-date
+p1,101,C1001,ada@x.io,Ada Byron,active,ent,20260421,vip,renamed
+p1,102,,kat@x.io,Katherine G
+Johnson,active,std,20260422,space,renamed
+p1,103,C1002,grace@x.io,Grace
+Hopper,active,,20260422,compiler,missing
+p1,104,C1002,grace@x.io,Grace
+Hopper,active,start,20260419,compiler,older
+p1,105,C1005,radia@x.io,Radia
+Perlman,active,ent,20260423,security,new-email
+p1,106,C1006,eve@x.io,Evelyn
+Granville,active,ent,20260422,math,upgraded
+p1,107,C1006,eve@x.io,Evelyn
+Granville,active,pro,20260420,math,older
+p2,108,C1001,ada@x.io,Ada L,inactive,std,20260422,vip,inactive
+p1,109,C1008,dot@x.io,Dorothy
+Vaughan,inactive,std,20260421,legacy,closed
