@@ -212,3 +212,23 @@ DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/zenafide
 ```
 
 Copy `.env.example` to `.env` and replace `JWT_SECRET_KEY` before deploying the service.
+
+## Deploy To Railway
+
+Create a Railway project from this GitHub repository and add a PostgreSQL service. Set these variables on the API service:
+
+```text
+DATABASE_URL=<PostgreSQL DATABASE_URL>
+JWT_SECRET_KEY=<random secret>
+SEED_DEMO_USERS=true
+```
+
+Railway supplies `PORT` automatically. The Docker image applies `alembic upgrade head` before starting the API.
+
+After deployment, verify:
+
+```text
+GET /health
+GET /metrics
+GET /docs
+```
