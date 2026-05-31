@@ -18,7 +18,7 @@ p1,004,C1004,annie@x.io,Annie Easley,active,start,20260420,math,bad-tier
 
     response = upload_csv(client, csv_text)
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     summary = response.json()
     assert summary["status"] == "partial_success"
     assert summary["total_rows"] == 4
@@ -48,7 +48,7 @@ p1,003,C1001,ada@x.io,Ada Old,active,pro,20260419,vip,older
 
     response = upload_csv(client, csv_text)
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert response.json()["status"] == "completed"
 
     customers = client.get("/customers", params={"partner_id": "p1"}).json()
@@ -70,8 +70,8 @@ p1,002,,kat@x.io,Katherine G Johnson,active,pro,20260422,space,renamed
     first_response = upload_csv(client, csv_text)
     second_response = upload_csv(client, csv_text)
 
-    assert first_response.status_code == 201
-    assert second_response.status_code == 201
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
     assert first_response.json()["status"] == "completed"
     assert second_response.json()["status"] == "completed"
 
@@ -91,7 +91,7 @@ p1,001,C1002,grace@x.io,Grace Hopper,active,,20260422,compiler,missing
 
     response = upload_csv(client, csv_text)
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert response.json()["status"] == "completed"
 
     customers = client.get("/customers", params={"partner_id": "p1"}).json()
@@ -113,7 +113,7 @@ p1,001,C1001,ada@x.io,Ada Lovelace,active,ent,20260420,vip,email
 
     response = upload_csv(client, csv_text)
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert response.json()["status"] == "completed"
 
 
@@ -125,7 +125,7 @@ Lovelace,active,ent,20260420,vip,email
 
     response = upload_csv(client, csv_text)
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert response.json()["status"] == "completed"
     customer = client.get("/customers", params={"partner_id": "p1"}).json()["items"][0]
     assert customer["name"] == "Ada Lovelace"
@@ -139,7 +139,7 @@ p1,001,C1001,ada@x.io,Ada Lovelace,active,ent,20260420,vip,email,unexpected
 
     response = upload_csv(client, csv_text)
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     summary = response.json()
     assert summary["status"] == "failed"
     assert summary["total_rows"] == 1
@@ -154,7 +154,7 @@ def test_example_csv_uses_newest_upd_value(client):
 
     response = upload_csv(client, csv_text, filename="example.csv")
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     summary = response.json()
     assert summary["status"] == "partial_success"
     assert summary["total_rows"] == 19

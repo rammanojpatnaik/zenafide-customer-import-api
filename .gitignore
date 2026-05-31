@@ -3,4 +3,5 @@
 __pycache__/
 *.py[cod]
 app.db
+uploads/
 .DS_Store

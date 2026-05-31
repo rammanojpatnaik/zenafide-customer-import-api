@@ -8,7 +8,10 @@ from app.database import Base, get_db
 from app.main import app
 from app import models as _models
 from app.models import User
+from app.celery_app import celery_app
+from app.config import settings
 from app.services.security import create_access_token, hash_password
+import app.tasks as tasks
 
 TEST_PASSWORD = "test-password"
 TEST_PASSWORD_HASH = hash_password(TEST_PASSWORD)
@@ -49,17 +52,27 @@ def db_session():
 
 
 @pytest.fixture()
-def client(db_session):
+def client(db_session, tmp_path):
     def override_get_db():
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
     original_session_factory = app.state.session_factory
+    original_task_session_factory = tasks.SessionLocal
+    original_upload_dir = settings.upload_dir
     app.state.session_factory = lambda: db_session
+    tasks.SessionLocal = lambda: db_session
+    settings.upload_dir = str(tmp_path / "uploads")
+    celery_app.conf.task_always_eager = True
+    celery_app.conf.task_eager_propagates = True
     with TestClient(app) as test_client:
         test_client.headers.update(
             {"Authorization": f"Bearer {create_access_token('admin@example.com')}"}
         )
         yield test_client
     app.state.session_factory = original_session_factory
+    tasks.SessionLocal = original_task_session_factory
+    settings.upload_dir = original_upload_dir
+    celery_app.conf.task_always_eager = False
+    celery_app.conf.task_eager_propagates = False
     app.dependency_overrides.clear()

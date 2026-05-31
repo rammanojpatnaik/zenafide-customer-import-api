@@ -72,7 +72,7 @@ def test_import_tracks_authenticated_uploader(client, db_session):
         },
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     import_job = db_session.get(ImportJob, response.json()["id"])
     assert import_job.uploaded_by is not None
     assert import_job.uploaded_by_user.email == "admin@example.com"

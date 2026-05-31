@@ -4,9 +4,10 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
+from pathlib import Path
 
 from email_validator import EmailNotValidError, validate_email
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Customer, ImportError, ImportJob
@@ -38,63 +39,64 @@ class ReconstructedCsv:
     malformed_rows: list[MalformedCsvRow]
 
 
-def import_customers_csv(
+def create_import_job(
     db: Session,
     filename: str,
-    content: bytes,
+    stored_file_path: str,
     uploaded_by: int | None = None,
 ) -> ImportJob:
     import_job = ImportJob(
         filename=filename,
-        status="processing",
+        stored_file_path=stored_file_path,
+        status="pending",
         uploaded_by=uploaded_by,
     )
     db.add(import_job)
     db.commit()
     db.refresh(import_job)
+    return import_job
+
+
+def process_import_job(db: Session, import_job_id: int) -> ImportJob:
+    import_job = db.get(ImportJob, import_job_id)
+    if import_job is None:
+        raise ValueError(f"Import job {import_job_id} does not exist.")
+
+    prepare_import_job_for_attempt(db, import_job)
     logger.info(
         "customer_import_started",
-        extra={"import_job_id": import_job.id, "import_filename": filename},
+        extra={"import_job_id": import_job.id, "import_filename": import_job.filename},
     )
 
     try:
+        content = Path(import_job.stored_file_path).read_bytes()
         text = content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        import_job.status = "failed"
-        import_job.failed_rows = 1
-        import_job.completed_at = datetime.utcnow()
-        db.add(
-            ImportError(
-                import_job_id=import_job.id,
-                row_number=0,
-                raw_row="",
-                error_code="invalid_encoding",
-                message="CSV file must be UTF-8 encoded.",
-            )
+    except OSError:
+        fail_import_job(
+            db,
+            import_job,
+            error_code="stored_file_unavailable",
+            message="Stored CSV file could not be read.",
         )
-        db.commit()
-        db.refresh(import_job)
-        finish_import_metrics_and_log(import_job)
+        raise
+    except UnicodeDecodeError:
+        fail_import_job(
+            db,
+            import_job,
+            error_code="invalid_encoding",
+            message="CSV file must be UTF-8 encoded.",
+        )
         return import_job
 
     reconstructed_csv = reconstruct_logical_csv_rows(text, import_job.id)
     reader = csv.DictReader(StringIO(reconstructed_csv.text))
     if not reader.fieldnames:
-        import_job.status = "failed"
-        import_job.failed_rows = 1
-        import_job.completed_at = datetime.utcnow()
-        db.add(
-            ImportError(
-                import_job_id=import_job.id,
-                row_number=0,
-                raw_row="",
-                error_code="missing_header",
-                message="CSV file must include a header row.",
-            )
+        fail_import_job(
+            db,
+            import_job,
+            error_code="missing_header",
+            message="CSV file must include a header row.",
         )
-        db.commit()
-        db.refresh(import_job)
-        finish_import_metrics_and_log(import_job)
         return import_job
 
     for malformed_row in reconstructed_csv.malformed_rows:
@@ -151,6 +153,60 @@ def import_customers_csv(
     db.refresh(import_job)
     finish_import_metrics_and_log(import_job)
     return import_job
+
+
+def prepare_import_job_for_attempt(db: Session, import_job: ImportJob) -> None:
+    db.execute(delete(ImportError).where(ImportError.import_job_id == import_job.id))
+    import_job.status = "processing"
+    import_job.total_rows = 0
+    import_job.successful_rows = 0
+    import_job.failed_rows = 0
+    import_job.completed_at = None
+    db.commit()
+    db.refresh(import_job)
+
+
+def fail_import_job(
+    db: Session,
+    import_job: ImportJob,
+    error_code: str,
+    message: str,
+) -> None:
+    import_job.status = "failed"
+    import_job.failed_rows = 1
+    import_job.completed_at = datetime.utcnow()
+    db.add(
+        ImportError(
+            import_job_id=import_job.id,
+            row_number=0,
+            raw_row="",
+            error_code=error_code,
+            message=message,
+        )
+    )
+    db.commit()
+    db.refresh(import_job)
+    finish_import_metrics_and_log(import_job)
+
+
+def mark_import_job_retrying(db: Session, import_job_id: int) -> None:
+    import_job = db.get(ImportJob, import_job_id)
+    if import_job is None:
+        return
+    import_job.status = "retrying"
+    db.commit()
+
+
+def mark_import_job_failed_after_retries(db: Session, import_job_id: int) -> None:
+    import_job = db.get(ImportJob, import_job_id)
+    if import_job is None or import_job.status == "failed":
+        return
+    fail_import_job(
+        db,
+        import_job,
+        error_code="worker_failed",
+        message="Import failed after worker retries were exhausted.",
+    )
 
 
 def reconstruct_logical_csv_rows(text: str, import_job_id: int) -> ReconstructedCsv:

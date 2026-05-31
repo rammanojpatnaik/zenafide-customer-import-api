@@ -12,6 +12,7 @@ class ImportJob(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_file_path: Mapped[str] = mapped_column(String(1000), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     successful_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

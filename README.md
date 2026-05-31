@@ -101,7 +101,8 @@ When running with Docker Compose, JSON logs are also written to:
 /var/log/zenafide/app.log
 ```
 
-The `logs_data` Docker volume keeps that file across `docker compose down` and subsequent restarts.
+The Celery worker writes its logs to `/var/log/zenafide/worker.log`. The `logs_data`
+Docker volume keeps both files across `docker compose down` and subsequent restarts.
 
 The public monitoring endpoints are:
 
@@ -112,7 +113,9 @@ GET /metrics
 
 `/health` verifies database connectivity. `/metrics` returns request counters stored in PostgreSQL and import counters derived from persisted import jobs. Metrics therefore survive API restarts and `docker compose down`.
 
-Docker Compose persists PostgreSQL data in `postgres_data` and logs in `logs_data`. Running `docker compose down --volumes` intentionally deletes both volumes.
+Docker Compose persists PostgreSQL data in `postgres_data`, logs in `logs_data`,
+uploaded CSV files in `uploads_data`, and Redis queues in `redis_data`. Running
+`docker compose down --volumes` intentionally deletes these volumes.
 
 ## Customer API
 
@@ -173,15 +176,19 @@ Example response:
 {
   "id": 1,
   "filename": "customers.csv",
-  "status": "partial_success",
-  "total_rows": 6,
-  "successful_rows": 4,
-  "failed_rows": 2,
+  "status": "pending",
+  "total_rows": 0,
+  "successful_rows": 0,
+  "failed_rows": 0,
   "created_at": "2026-05-31T03:46:57",
-  "completed_at": "2026-05-31T03:46:57",
+  "completed_at": null,
   "errors_url": "/imports/1/errors"
 }
 ```
+
+The upload endpoint returns `202 Accepted`. Poll the import summary endpoint until
+the status changes from `pending`, `processing`, or `retrying` to `completed`,
+`partial_success`, or `failed`.
 
 Fetch an import summary:
 
@@ -199,7 +206,9 @@ curl http://localhost:8000/imports/1/errors \
 
 Import rules:
 
-- Rows are processed synchronously, one at a time.
+- The API stores the CSV in durable upload storage and queues a Celery task.
+- Celery retries unexpected worker failures up to three times with backoff.
+- Each worker attempt processes rows sequentially so row-level validation stays deterministic.
 - Invalid rows are saved to `import_errors`; the rest of the file continues.
 - Customers are matched by `partner_id + partner_customer_id` when `cid` exists.
 - If `cid` is missing, customers are matched by `partner_id + email`.
@@ -213,6 +222,8 @@ Import rules:
 The Docker Compose setup starts:
 
 - `api`: FastAPI app running on port `8000`
+- `worker`: Celery worker processing queued CSV imports
+- `redis`: persistent Celery broker and result backend
 - `db`: PostgreSQL running on port `5432`
 
 The API reads its database connection from:
@@ -225,12 +236,19 @@ Copy `.env.example` to `.env` and replace `JWT_SECRET_KEY` before deploying the 
 
 ## Deploy To Railway
 
-Create a Railway project from this GitHub repository and add a PostgreSQL service. Set these variables on the API service:
+The Docker Compose setup uses a shared upload volume between the API and worker.
+For a multi-service cloud deployment, replace that shared volume with object
+storage such as S3 before deploying.
+
+Create a Railway project from this GitHub repository and add PostgreSQL and Redis
+services. Set these variables on the API and worker services:
 
 ```text
 DATABASE_URL=<PostgreSQL DATABASE_URL>
 JWT_SECRET_KEY=<random secret>
 SEED_DEMO_USERS=true
+CELERY_BROKER_URL=<Redis URL>
+CELERY_RESULT_BACKEND=<Redis URL>
 ```
 
 Railway supplies `PORT` automatically. The Docker image applies `alembic upgrade head` before starting the API.

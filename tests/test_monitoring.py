@@ -18,7 +18,7 @@ p1,001,C1001,ada@x.io,Ada Lovelace,active,ent,20260420,vip,email
         "/imports/customers",
         files={"file": ("customers.csv", csv_text, "text/csv")},
     )
-    assert import_response.status_code == 201
+    assert import_response.status_code == 202
 
     metrics_response = client.get("/metrics")
 
@@ -29,6 +29,6 @@ p1,001,C1001,ada@x.io,Ada Lovelace,active,ent,20260420,vip,email
     assert any(
         item["method"] == "POST"
         and item["path"] == "/imports/customers"
-        and item["status_code"] == 201
+        and item["status_code"] == 202
         for item in metrics["requests"]
     )

@@ -5,8 +5,10 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import ImportError, ImportJob, User
 from app.schemas import ImportErrorList, ImportJobRead, ImportJobSummary
-from app.services.csv_import import import_customers_csv
+from app.services.csv_import import create_import_job
 from app.services.security import require_roles
+from app.services.upload_storage import store_upload
+from app.tasks import process_customer_import
 
 
 router = APIRouter()
@@ -15,7 +17,7 @@ router = APIRouter()
 @router.post(
     "/customers",
     response_model=ImportJobSummary,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def import_customers(
     file: UploadFile = File(...),
@@ -34,13 +36,14 @@ async def import_customers(
             detail="Only CSV files are supported.",
         )
 
-    content = await file.read()
-    import_job = import_customers_csv(
+    stored_file_path = await store_upload(file)
+    import_job = create_import_job(
         db,
         filename=file.filename,
-        content=content,
+        stored_file_path=stored_file_path,
         uploaded_by=current_user.id,
     )
+    process_customer_import.delay(import_job.id)
     return build_import_summary(import_job)
 
 
