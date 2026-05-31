@@ -1,39 +1,62 @@
-from collections import Counter
-from threading import Lock
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
-_lock = Lock()
-_request_counts: Counter[tuple[str, str, int]] = Counter()
-_import_counts: Counter[str] = Counter()
-_import_rows: Counter[str] = Counter()
+from app.models import ImportJob, RequestMetric
 
 
-def record_request(method: str, path: str, status_code: int) -> None:
-    with _lock:
-        _request_counts[(method, path, status_code)] += 1
+def record_request(db: Session, method: str, path: str, status_code: int) -> None:
+    db.add(RequestMetric(method=method, path=path, status_code=status_code))
+    db.commit()
 
 
-def record_import(status: str, successful_rows: int, failed_rows: int) -> None:
-    with _lock:
-        _import_counts[status] += 1
-        _import_rows["successful"] += successful_rows
-        _import_rows["failed"] += failed_rows
-
-
-def snapshot() -> dict[str, object]:
-    with _lock:
-        requests = [
-            {
-                "method": method,
-                "path": path,
-                "status_code": status_code,
-                "count": count,
-            }
-            for (method, path, status_code), count in sorted(_request_counts.items())
-        ]
-        return {
-            "requests": requests,
-            "imports": {
-                "by_status": dict(_import_counts),
-                "rows": dict(_import_rows),
-            },
+def snapshot(db: Session) -> dict[str, object]:
+    request_statement = (
+        select(
+            RequestMetric.method,
+            RequestMetric.path,
+            RequestMetric.status_code,
+            func.count(RequestMetric.id),
+        )
+        .group_by(
+            RequestMetric.method,
+            RequestMetric.path,
+            RequestMetric.status_code,
+        )
+        .order_by(
+            RequestMetric.method,
+            RequestMetric.path,
+            RequestMetric.status_code,
+        )
+    )
+    requests = [
+        {
+            "method": method,
+            "path": path,
+            "status_code": status_code,
+            "count": count,
         }
+        for method, path, status_code, count in db.execute(request_statement).all()
+    ]
+
+    import_status_statement = select(
+        ImportJob.status,
+        func.count(ImportJob.id),
+    ).group_by(ImportJob.status)
+    import_counts = dict(db.execute(import_status_statement).all())
+
+    import_rows_statement = select(
+        func.coalesce(func.sum(ImportJob.successful_rows), 0),
+        func.coalesce(func.sum(ImportJob.failed_rows), 0),
+    )
+    successful_rows, failed_rows = db.execute(import_rows_statement).one()
+
+    return {
+        "requests": requests,
+        "imports": {
+            "by_status": import_counts,
+            "rows": {
+                "successful": successful_rows,
+                "failed": failed_rows,
+            },
+        },
+    }

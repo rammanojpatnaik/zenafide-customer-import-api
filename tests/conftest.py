@@ -54,9 +54,12 @@ def client(db_session):
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+    original_session_factory = app.state.session_factory
+    app.state.session_factory = lambda: db_session
     with TestClient(app) as test_client:
         test_client.headers.update(
             {"Authorization": f"Bearer {create_access_token('admin@example.com')}"}
         )
         yield test_client
+    app.state.session_factory = original_session_factory
     app.dependency_overrides.clear()

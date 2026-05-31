@@ -95,6 +95,14 @@ The API writes structured JSON logs to stdout for:
 
 Every HTTP response includes an `X-Request-ID` header. You can supply your own `X-Request-ID` header to correlate a request with its logs.
 
+When running with Docker Compose, JSON logs are also written to:
+
+```text
+/var/log/zenafide/app.log
+```
+
+The `logs_data` Docker volume keeps that file across `docker compose down` and subsequent restarts.
+
 The public monitoring endpoints are:
 
 ```text
@@ -102,7 +110,9 @@ GET /health
 GET /metrics
 ```
 
-`/health` verifies database connectivity. `/metrics` returns lightweight in-process request and import counters.
+`/health` verifies database connectivity. `/metrics` returns request counters stored in PostgreSQL and import counters derived from persisted import jobs. Metrics therefore survive API restarts and `docker compose down`.
+
+Docker Compose persists PostgreSQL data in `postgres_data` and logs in `logs_data`. Running `docker compose down --volumes` intentionally deletes both volumes.
 
 ## Customer API
 

@@ -4,6 +4,7 @@ from time import perf_counter
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes import auth, customers, health, imports
 from app.database import SessionLocal
@@ -26,6 +27,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.state.session_factory = SessionLocal
 
 
 @app.middleware("http")
@@ -35,7 +37,11 @@ async def log_requests(request: Request, call_next):
     response = await call_next(request)
     duration_ms = round((perf_counter() - started_at) * 1000, 2)
     response.headers["X-Request-ID"] = request_id
-    record_request(request.method, request.url.path, response.status_code)
+    try:
+        with request.app.state.session_factory() as db:
+            record_request(db, request.method, request.url.path, response.status_code)
+    except SQLAlchemyError:
+        logger.warning("request_metric_persistence_failed")
     logger.info(
         "request_completed",
         extra={

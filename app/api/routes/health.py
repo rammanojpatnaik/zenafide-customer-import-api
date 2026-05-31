@@ -26,5 +26,5 @@ def health_check(db: Session = Depends(get_db)):
 
 
 @router.get("/metrics")
-def metrics():
-    return snapshot()
+def metrics(db: Session = Depends(get_db)):
+    return snapshot(db)

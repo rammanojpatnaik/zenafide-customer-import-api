@@ -12,6 +12,7 @@ services:
       OPERATOR_EMAIL: ${OPERATOR_EMAIL:-operator@example.com}
       OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-operator123}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: ${LOG_FILE:-/var/log/zenafide/app.log}
     ports:
       - "8000:8000"
     depends_on:
@@ -19,6 +20,7 @@ services:
         condition: service_healthy
     volumes:
       - ./app:/app/app
+      - logs_data:/var/log/zenafide
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   db:
@@ -40,3 +42,4 @@ services:
 
 volumes:
   postgres_data:
+  logs_data:

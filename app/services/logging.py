@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.config import settings
 
@@ -33,10 +34,19 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging() -> None:
-    handler = logging.StreamHandler()
-    handler.setFormatter(JsonFormatter())
-
+    formatter = JsonFormatter()
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
-    root_logger.addHandler(handler)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
+    if settings.log_file:
+        log_path = Path(settings.log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_path)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
     root_logger.setLevel(settings.log_level.upper())

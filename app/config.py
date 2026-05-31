@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     operator_email: str = "operator@example.com"
     operator_password: str = "operator123"
     log_level: str = "INFO"
+    log_file: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

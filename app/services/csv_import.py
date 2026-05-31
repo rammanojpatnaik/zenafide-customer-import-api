@@ -10,7 +10,6 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Customer, ImportError, ImportJob
-from app.services.metrics import record_import
 
 VALID_STATUSES = {"active", "inactive"}
 VALID_TIERS = {"std", "pro", "ent"}
@@ -245,11 +244,6 @@ def log_row_failure(import_job_id: int, row_number: int, error_code: str) -> Non
 
 
 def finish_import_metrics_and_log(import_job: ImportJob) -> None:
-    record_import(
-        status=import_job.status,
-        successful_rows=import_job.successful_rows,
-        failed_rows=import_job.failed_rows,
-    )
     logger.info(
         "customer_import_completed",
         extra={
