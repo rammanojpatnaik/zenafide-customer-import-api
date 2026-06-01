@@ -18,11 +18,12 @@ COPY alembic ./alembic
 COPY alembic.ini .
 COPY tests ./tests
 COPY supervisord.conf /etc/supervisor/conf.d/zenafide.conf
+COPY start.sh /start.sh
 
-RUN mkdir -p /var/log/zenafide /var/lib/zenafide/uploads
+RUN chmod +x /start.sh \
+    && mkdir -p /var/log/zenafide /var/lib/zenafide/uploads
 
 EXPOSE 8000
 
-# Default: single-container mode (API + Celery worker via supervisord).
-# Override CMD in docker-compose.dev.yml or Railway worker service if needed.
-CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+# Runs migrations first, then starts API + Celery worker via supervisord.
+CMD ["/start.sh"]
