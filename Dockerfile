@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libpq-dev \
+    && apt-get install -y --no-install-recommends gcc libpq-dev supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -17,7 +17,12 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini .
 COPY tests ./tests
+COPY supervisord.conf /etc/supervisor/conf.d/zenafide.conf
+
+RUN mkdir -p /var/log/zenafide /var/lib/zenafide/uploads
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Default: single-container mode (API + Celery worker via supervisord).
+# Override CMD in docker-compose.dev.yml or Railway worker service if needed.
+CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

@@ -6,7 +6,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/zenafide
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-development-secret}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
-      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-false}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
       OPERATOR_EMAIL: ${OPERATOR_EMAIL:-operator@example.com}
@@ -16,6 +16,7 @@ services:
       UPLOAD_DIR: ${UPLOAD_DIR:-/var/lib/zenafide/uploads}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
     ports:
       - "8000:8000"
     depends_on:
@@ -26,27 +27,6 @@ services:
     volumes:
       - logs_data:/var/log/zenafide
       - uploads_data:/var/lib/zenafide/uploads
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
-
-  worker:
-    build: .
-    container_name: zenafide-worker
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/zenafide
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      LOG_FILE: ${LOG_FILE:-/var/log/zenafide/app.log}
-      UPLOAD_DIR: ${UPLOAD_DIR:-/var/lib/zenafide/uploads}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - logs_data:/var/log/zenafide
-      - uploads_data:/var/lib/zenafide/uploads
-    command: celery -A app.celery_app.celery_app worker --loglevel=INFO --logfile=/var/log/zenafide/worker.log
 
   redis:
     image: redis:7-alpine

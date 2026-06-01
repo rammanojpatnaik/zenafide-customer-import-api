@@ -1,4 +1,4 @@
-# Development overrides — adds hot-reload and live-mounts app source.
+# Development overrides — hot-reload, live source mount, and separate api/worker processes.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 services:
   api:
@@ -11,3 +11,4 @@ services:
   worker:
     volumes:
       - ./app:/app/app
+    command: celery -A app.celery_app.celery_app worker --loglevel=INFO
