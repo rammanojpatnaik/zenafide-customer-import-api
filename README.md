@@ -300,9 +300,10 @@ GET /metrics
 GET /docs
 ```
 
-> **Note:** `STORAGE_BACKEND=local` works for single-container deployments. To scale
-> to multiple replicas in future, switch to `STORAGE_BACKEND=s3` and add the
-> corresponding `S3_BUCKET`, `S3_REGION`, `AWS_ACCESS_KEY_ID`, and
+> **Note:** `STORAGE_BACKEND=local` works for a single-container interview
+> deployment, but Railway local files are not guaranteed to survive redeployments.
+> For durable retention or multiple replicas, switch to `STORAGE_BACKEND=s3` and
+> add the corresponding `S3_BUCKET`, `S3_REGION`, `AWS_ACCESS_KEY_ID`, and
 > `AWS_SECRET_ACCESS_KEY` variables.
 
 ## Assumptions
@@ -314,11 +315,11 @@ They are documented here so reviewers and future contributors can challenge or e
 
 - **Header row is always the first line.** Files without a header are rejected outright (`missing_header` error).
 - **Exactly 10 columns are expected** (`p, row, cid, email, name, status, tier, upd, tags, note`). This count is used to detect and recover visually wrapped rows — if a physical line has fewer than 10 comma-separated values, the next physical line is stitched on to it with a space until 10 columns are reached. A row that cannot be recovered this way is recorded as `invalid_column_count` and skipped.
-- **Column names may vary between partner exports.** Headers are normalised to lowercase and stripped of whitespace before field lookup, so minor capitalisation differences are tolerated.
+- **The expected column names are fixed.** Headers are normalised to lowercase and stripped of whitespace before field lookup, so minor capitalisation and surrounding-whitespace differences are tolerated. Arbitrary aliases are not supported.
 - **Files are UTF-8 encoded** (BOM variant `utf-8-sig` is also accepted). Files in other encodings are rejected with an `invalid_encoding` error.
-- **The `upd` field uses `YYYYMMDD` format.** Any other format is rejected as `invalid_date`.
+- **The `upd` field uses `YYYYMMDD` format.** Any other format is rejected as `invalid_updated_at`.
 - **Blank `tier` defaults to `std`.** An absent or empty tier is treated as standard tier. Any other unrecognised tier value is a validation error.
-- **`tags` and `note` are free-text strings** — no validation beyond presence. They are stored as plain text and are nullable.
+- **`tags` and `note` are optional free-text strings.** They are stored as plain text and are nullable.
 - **The `row` column is a partner-assigned sequence number** used only for human traceability; it is not stored or validated beyond being part of the column count.
 - **File size is capped at 100 MB.** Files larger than this are rejected at upload time with a `413` response.
 
@@ -335,7 +336,7 @@ They are documented here so reviewers and future contributors can challenge or e
 - **Imports are processed asynchronously.** The upload endpoint returns `202 Accepted` immediately. Clients must poll `GET /imports/{id}` until the status is `completed`, `partial_success`, or `failed`.
 - **A bad row never aborts the rest of the file.** Each row is validated and processed independently. Failures are recorded in `import_errors` and the import continues.
 - **Worker failures are retried up to 3 times with exponential backoff.** On each retry attempt all row counters and errors for that import job are reset so results are always consistent with the final attempt. If all retries are exhausted the job is marked `failed` with error code `worker_failed`.
-- **Uploaded files are stored durably** (local volume or S3) before the Celery task is queued. If the worker cannot read the file it records `stored_file_unavailable` and fails the job rather than silently losing rows.
+- **Uploaded files are stored before the Celery task is queued.** Docker Compose uses a named local volume, which survives `docker compose down`. S3-compatible storage is available for multi-instance or durable cloud deployments. If a local stored file cannot be read, the worker records `stored_file_unavailable`; unexpected storage failures are retried and eventually recorded as `worker_failed`.
 - **Row processing within a single worker attempt is sequential**, not parallel. This keeps row-level error reporting deterministic and avoids write conflicts on the same customer record within one import.
 
 ### Authentication and Authorisation
@@ -343,7 +344,7 @@ They are documented here so reviewers and future contributors can challenge or e
 - **Two roles exist: `admin` and `operator`.** Both can create, view, and edit customers and trigger imports. Only `admin` can delete customers.
 - **Authentication uses short-lived JWT bearer tokens** (default 30-minute expiry). There is no refresh token mechanism — clients must re-authenticate after expiry.
 - **Passwords are hashed with Argon2** via `pwdlib`. Plain-text passwords are never stored or logged.
-- **Demo users (`admin@example.com`, `operator@example.com`) are seeded only when `SEED_DEMO_USERS=true`.** This is off by default in production. Demo credentials are only appropriate for local development.
+- **Demo users (`admin@example.com`, `operator@example.com`) are seeded only when `SEED_DEMO_USERS=true`.** The production-style Docker Compose configuration defaults this to `false`. Demo credentials are only appropriate for local development or interview evaluation.
 
 ### Monitoring and Metrics
 
@@ -353,6 +354,6 @@ They are documented here so reviewers and future contributors can challenge or e
 
 ### Infrastructure
 
-- **The API and Celery worker run in the same container** via supervisord. This keeps upload storage simple (local filesystem, no S3 needed) and is suitable for single-instance deployments. To scale horizontally in future, switch to `STORAGE_BACKEND=s3` and run the worker as a separate service.
+- **The API and Celery worker run in the same container** via supervisord. This keeps upload storage simple and is suitable for a single-instance interview deployment. The Railway container filesystem should not be treated as durable across redeployments. To retain uploaded files durably or scale horizontally, switch to `STORAGE_BACKEND=s3` and run the worker as a separate service.
 - **Redis is used as both the Celery broker and result backend.** Persistence is enabled (`appendonly yes`) so queued tasks survive Redis restarts.
 - **Database migrations are applied automatically** (`alembic upgrade head`) on API startup. This is safe for development and small deployments; larger production setups may prefer to run migrations as a separate step before deploying.
