@@ -4,13 +4,13 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
-from pathlib import Path
 
 from email_validator import EmailNotValidError, validate_email
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Customer, ImportError, ImportJob
+from app.services.upload_storage import read_upload
 
 VALID_STATUSES = {"active", "inactive"}
 VALID_TIERS = {"std", "pro", "ent"}
@@ -69,7 +69,7 @@ def process_import_job(db: Session, import_job_id: int) -> ImportJob:
     )
 
     try:
-        content = Path(import_job.stored_file_path).read_bytes()
+        content = read_upload(import_job.stored_file_path)
         text = content.decode("utf-8-sig")
     except OSError:
         fail_import_job(

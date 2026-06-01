@@ -10,6 +10,7 @@ from app.services.security import require_roles
 from app.services.upload_storage import store_upload
 from app.tasks import process_customer_import
 
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 
 router = APIRouter()
 
@@ -34,6 +35,12 @@ async def import_customers(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only CSV files are supported.",
+        )
+
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB size limit.",
         )
 
     stored_file_path = await store_upload(file)

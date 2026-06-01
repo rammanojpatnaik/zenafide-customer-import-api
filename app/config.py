@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
+    # Storage backend: "local" (default) or "s3"
+    storage_backend: str = "local"
+    s3_bucket: str | None = None
+    s3_region: str = "us-east-1"
+    s3_endpoint_url: str | None = None  # For non-AWS providers (R2, MinIO, etc.)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

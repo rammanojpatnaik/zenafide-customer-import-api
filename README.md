@@ -10,6 +10,12 @@ Start Docker Desktop first, then run:
 docker compose up --build
 ```
 
+For local development with hot-reload:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
 The API will be available at:
 
 ```text
@@ -63,8 +69,16 @@ Both roles can view and edit customers and run imports. Only admins can delete c
 
 ## Run Tests
 
+Locally (after `pip install -r requirements.txt`):
+
 ```bash
 pytest
+```
+
+Inside Docker:
+
+```bash
+docker compose exec api pytest tests/ -q
 ```
 
 ## Database Migrations
@@ -232,23 +246,32 @@ The API reads its database connection from:
 DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/zenafide
 ```
 
-Copy `.env.example` to `.env` and replace `JWT_SECRET_KEY` before deploying the service.
+Copy `.env.example` to `.env` and replace `JWT_SECRET_KEY` with a random secret
+before deploying:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
 
 ## Deploy To Railway
 
-The Docker Compose setup uses a shared upload volume between the API and worker.
-For a multi-service cloud deployment, replace that shared volume with object
-storage such as S3 before deploying.
+Create a Railway project from this GitHub repository and add PostgreSQL, Redis,
+and an S3-compatible bucket (Railway Object Storage, AWS S3, or Cloudflare R2).
 
-Create a Railway project from this GitHub repository and add PostgreSQL and Redis
-services. Set these variables on the API and worker services:
+Set these variables on **both** the API and worker services:
 
 ```text
 DATABASE_URL=<PostgreSQL DATABASE_URL>
-JWT_SECRET_KEY=<random secret>
-SEED_DEMO_USERS=true
+JWT_SECRET_KEY=<random secret — generate with the command above>
+SEED_DEMO_USERS=false
 CELERY_BROKER_URL=<Redis URL>
 CELERY_RESULT_BACKEND=<Redis URL>
+STORAGE_BACKEND=s3
+S3_BUCKET=<bucket-name>
+S3_REGION=<region>
+AWS_ACCESS_KEY_ID=<key>
+AWS_SECRET_ACCESS_KEY=<secret>
+# S3_ENDPOINT_URL=<url>   # only needed for non-AWS providers
 ```
 
 Railway supplies `PORT` automatically. The Docker image applies `alembic upgrade head` before starting the API.
@@ -260,3 +283,55 @@ GET /health
 GET /metrics
 GET /docs
 ```
+
+## Assumptions
+
+The following assumptions were made during design and implementation.
+They are documented here so reviewers and future contributors can challenge or extend them.
+
+### CSV Format
+
+- **Header row is always the first line.** Files without a header are rejected outright (`missing_header` error).
+- **Exactly 10 columns are expected** (`p, row, cid, email, name, status, tier, upd, tags, note`). This count is used to detect and recover visually wrapped rows — if a physical line has fewer than 10 comma-separated values, the next physical line is stitched on to it with a space until 10 columns are reached. A row that cannot be recovered this way is recorded as `invalid_column_count` and skipped.
+- **Column names may vary between partner exports.** Headers are normalised to lowercase and stripped of whitespace before field lookup, so minor capitalisation differences are tolerated.
+- **Files are UTF-8 encoded** (BOM variant `utf-8-sig` is also accepted). Files in other encodings are rejected with an `invalid_encoding` error.
+- **The `upd` field uses `YYYYMMDD` format.** Any other format is rejected as `invalid_date`.
+- **Blank `tier` defaults to `std`.** An absent or empty tier is treated as standard tier. Any other unrecognised tier value is a validation error.
+- **`tags` and `note` are free-text strings** — no validation beyond presence. They are stored as plain text and are nullable.
+- **The `row` column is a partner-assigned sequence number** used only for human traceability; it is not stored or validated beyond being part of the column count.
+- **File size is capped at 100 MB.** Files larger than this are rejected at upload time with a `413` response.
+
+### Customer Identity and Deduplication
+
+- **A customer is uniquely identified within a partner by `partner_id + partner_customer_id` when `cid` is present**, or by `partner_id + email` when `cid` is absent. Two rows in the same file with the same identity are treated as duplicates.
+- **Partner namespaces are completely isolated.** `p1/C1001` and `p2/C1001` are different customers even if they share the same email address.
+- **The `upd` date is the source of truth for staleness.** A newer `upd` value overwrites all customer fields except `internal_note`. An equal or older `upd` is silently skipped (counted as successful, no data change).
+- **`internal_note` is never overwritten by an import.** It is reserved for manually entered notes from operators and is preserved across all import runs.
+- **Email addresses are normalised** (lowercased and validated via `email-validator`) before storage and comparison. Deliverability is not checked — only format validity.
+
+### Import Lifecycle
+
+- **Imports are processed asynchronously.** The upload endpoint returns `202 Accepted` immediately. Clients must poll `GET /imports/{id}` until the status is `completed`, `partial_success`, or `failed`.
+- **A bad row never aborts the rest of the file.** Each row is validated and processed independently. Failures are recorded in `import_errors` and the import continues.
+- **Worker failures are retried up to 3 times with exponential backoff.** On each retry attempt all row counters and errors for that import job are reset so results are always consistent with the final attempt. If all retries are exhausted the job is marked `failed` with error code `worker_failed`.
+- **Uploaded files are stored durably** (local volume or S3) before the Celery task is queued. If the worker cannot read the file it records `stored_file_unavailable` and fails the job rather than silently losing rows.
+- **Row processing within a single worker attempt is sequential**, not parallel. This keeps row-level error reporting deterministic and avoids write conflicts on the same customer record within one import.
+
+### Authentication and Authorisation
+
+- **Two roles exist: `admin` and `operator`.** Both can create, view, and edit customers and trigger imports. Only `admin` can delete customers.
+- **Authentication uses short-lived JWT bearer tokens** (default 30-minute expiry). There is no refresh token mechanism — clients must re-authenticate after expiry.
+- **Passwords are hashed with Argon2** via `pwdlib`. Plain-text passwords are never stored or logged.
+- **Demo users (`admin@example.com`, `operator@example.com`) are seeded only when `SEED_DEMO_USERS=true`.** This is off by default in production. Demo credentials are only appropriate for local development.
+
+### Monitoring and Metrics
+
+- **Request metrics are persisted in PostgreSQL**, not in memory. This means metrics survive API restarts and `docker compose down`. The trade-off is a small extra write per request.
+- **The `/metrics` endpoint is public** (no authentication required) to allow infrastructure health checks without managing tokens. It exposes only aggregate counts — no customer data.
+- **Import metrics are derived from persisted import jobs**, not a separate counter table. `by_status` and row counts are always consistent with the actual job records.
+
+### Infrastructure
+
+- **Single-host Docker Compose uses a shared volume** for CSV uploads between the API and worker. This is simple and reliable for one-machine deployments but does not work across separate hosts. Set `STORAGE_BACKEND=s3` for multi-service cloud deployments.
+- **Redis is used as both the Celery broker and result backend.** Persistence is enabled (`appendonly yes`) so queued tasks survive Redis restarts.
+- **Database migrations are applied automatically** (`alembic upgrade head`) on API startup. This is safe for development and small deployments; larger production setups may prefer to run migrations as a separate step before deploying.

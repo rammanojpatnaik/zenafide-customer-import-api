@@ -7,16 +7,29 @@ from fastapi import FastAPI, Request
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes import auth, customers, health, imports
+from app.config import settings
 from app.database import SessionLocal
 from app.services.logging import configure_logging
 from app.services.metrics import record_request
 from app.services.users import seed_demo_users
+
+_INSECURE_SECRETS = {
+    "change-this-secret-before-deploying",
+    "local-development-secret",
+    "replace-with-a-random-secret",
+}
 
 configure_logging()
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.jwt_secret_key in _INSECURE_SECRETS:
+        logger.warning(
+            "insecure_jwt_secret",
+            extra={"detail": "JWT_SECRET_KEY is set to a known placeholder. "
+                             "Generate a secret with: python3 -c \"import secrets; print(secrets.token_hex(32))\""},
+        )
     with SessionLocal() as db:
         seed_demo_users(db)
     yield

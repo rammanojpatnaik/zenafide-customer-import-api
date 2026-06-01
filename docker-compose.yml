@@ -24,10 +24,9 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./app:/app/app
       - logs_data:/var/log/zenafide
       - uploads_data:/var/lib/zenafide/uploads
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   worker:
     build: .
@@ -45,7 +44,6 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./app:/app/app
       - logs_data:/var/log/zenafide
       - uploads_data:/var/lib/zenafide/uploads
     command: celery -A app.celery_app.celery_app worker --loglevel=INFO --logfile=/var/log/zenafide/worker.log

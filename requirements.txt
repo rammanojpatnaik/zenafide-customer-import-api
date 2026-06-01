@@ -12,3 +12,4 @@ pwdlib[argon2]
 pytest
 httpx
 celery[redis]
+boto3
