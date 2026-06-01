@@ -133,8 +133,7 @@ When running with Docker Compose, JSON logs are also written to:
 /var/log/zenafide/app.log
 ```
 
-The Celery worker writes its logs to `/var/log/zenafide/worker.log`. The `logs_data`
-Docker volume keeps both files across `docker compose down` and subsequent restarts.
+The `logs_data` Docker volume keeps this file across `docker compose down` and subsequent restarts.
 
 The public monitoring endpoints are:
 
@@ -253,8 +252,7 @@ Import rules:
 
 The Docker Compose setup starts:
 
-- `api`: FastAPI app running on port `8000`
-- `worker`: Celery worker processing queued CSV imports
+- `api`: FastAPI app + Celery worker running together via supervisord on port `8000`
 - `redis`: persistent Celery broker and result backend
 - `db`: PostgreSQL running on port `5432`
 
@@ -273,26 +271,26 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 
 ## Deploy To Railway
 
-Create a Railway project from this GitHub repository and add PostgreSQL, Redis,
-and an S3-compatible bucket (Railway Object Storage, AWS S3, or Cloudflare R2).
+Create a Railway project from this GitHub repository and add PostgreSQL and Redis services.
 
-Set these variables on **both** the API and worker services:
+The API and Celery worker run together in a single container via supervisord, so no separate worker service is needed. Migrations run automatically on startup via `start.sh`.
+
+Set these variables on the API service:
 
 ```text
-DATABASE_URL=<PostgreSQL DATABASE_URL>
+DATABASE_URL=<PostgreSQL DATABASE_URL from Railway Connect tab>
+CELERY_BROKER_URL=<Redis URL from Railway Connect tab>
+CELERY_RESULT_BACKEND=<same Redis URL>
 JWT_SECRET_KEY=<random secret — generate with the command above>
-SEED_DEMO_USERS=false
-CELERY_BROKER_URL=<Redis URL>
-CELERY_RESULT_BACKEND=<Redis URL>
-STORAGE_BACKEND=s3
-S3_BUCKET=<bucket-name>
-S3_REGION=<region>
-AWS_ACCESS_KEY_ID=<key>
-AWS_SECRET_ACCESS_KEY=<secret>
-# S3_ENDPOINT_URL=<url>   # only needed for non-AWS providers
+SEED_DEMO_USERS=true
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=<your password>
+OPERATOR_EMAIL=operator@example.com
+OPERATOR_PASSWORD=<your password>
+STORAGE_BACKEND=local
 ```
 
-Railway supplies `PORT` automatically. The Docker image applies `alembic upgrade head` before starting the API.
+Railway supplies `PORT` automatically.
 
 After deployment, verify:
 
@@ -301,6 +299,11 @@ GET /health
 GET /metrics
 GET /docs
 ```
+
+> **Note:** `STORAGE_BACKEND=local` works for single-container deployments. To scale
+> to multiple replicas in future, switch to `STORAGE_BACKEND=s3` and add the
+> corresponding `S3_BUCKET`, `S3_REGION`, `AWS_ACCESS_KEY_ID`, and
+> `AWS_SECRET_ACCESS_KEY` variables.
 
 ## Assumptions
 
@@ -350,6 +353,6 @@ They are documented here so reviewers and future contributors can challenge or e
 
 ### Infrastructure
 
-- **Single-host Docker Compose uses a shared volume** for CSV uploads between the API and worker. This is simple and reliable for one-machine deployments but does not work across separate hosts. Set `STORAGE_BACKEND=s3` for multi-service cloud deployments.
+- **The API and Celery worker run in the same container** via supervisord. This keeps upload storage simple (local filesystem, no S3 needed) and is suitable for single-instance deployments. To scale horizontally in future, switch to `STORAGE_BACKEND=s3` and run the worker as a separate service.
 - **Redis is used as both the Celery broker and result backend.** Persistence is enabled (`appendonly yes`) so queued tasks survive Redis restarts.
 - **Database migrations are applied automatically** (`alembic upgrade head`) on API startup. This is safe for development and small deployments; larger production setups may prefer to run migrations as a separate step before deploying.
