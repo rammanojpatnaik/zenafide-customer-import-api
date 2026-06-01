@@ -2,6 +2,24 @@
 
 Backend service for importing partner customer CSV exports and managing customer records.
 
+## Live Deployment
+
+The service is deployed on Railway and publicly accessible:
+
+| | |
+|---|---|
+| **Base URL** | `https://zenafide-customer-import-api-production.up.railway.app` |
+| **API Docs** | `https://zenafide-customer-import-api-production.up.railway.app/docs` |
+| **Health** | `https://zenafide-customer-import-api-production.up.railway.app/health` |
+| **Metrics** | `https://zenafide-customer-import-api-production.up.railway.app/metrics` |
+
+Demo credentials:
+
+```text
+admin@example.com / admin123
+operator@example.com / operator123
+```
+
 ## Run With Docker
 
 Start Docker Desktop first, then run:
